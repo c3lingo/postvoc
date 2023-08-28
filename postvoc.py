@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
-import sys
-import subprocess
+import os
 import re
+import subprocess
+import sys
+
 
 def get_language_code(filename):
     match = re.search(r'-(\w{3})\.\w+$', filename)
@@ -19,10 +21,13 @@ def main():
     video_file = sys.argv[1]
     audio_files = []
     force_flag = False
+    dry_run_flag = False
 
     for arg in sys.argv[2:]:
         if arg == "--force":
             force_flag = True
+        elif arg == "--dry-run":
+            dry_run_flag = True
         else:
             audio_files.append(arg)
 
@@ -40,17 +45,20 @@ def main():
             lang = parts[1].strip()
             existing_audio_streams[stream_index] = lang
 
-    # Check if any of the new audio languages already exist unless force_flag is set
-    new_audio_streams = {}
+    # Map input file index to languages/files
+    new_audio_streams = []
     for audio_file_index, audio_file in enumerate(audio_files):
         audio_language = get_language_code(audio_file)
-        if audio_language in existing_audio_streams.values() and not force_flag:
-            print(f"The language {audio_language} already exists in the master video. Use --force to override.")
-            return
-        new_audio_streams[audio_file_index] = {"file": audio_file, "lang": audio_language}
+        new_audio_streams.append(audio_language)
 
     print(f"Video file {video_file} has existing audio streams: {existing_audio_streams}")
     print(f"New audio streams to add or replace: {new_audio_streams}")
+
+    # Check if any of the new audio languages already exist unless force_flag is set
+    for audio_language in new_audio_streams:
+        if audio_language in existing_audio_streams.values() and not force_flag:
+            print(f"The language {audio_language} already exists in the master video. Use --force to override.")
+            return
 
     # Construct the ffmpeg command: Load video file as input #0
     ffmpeg_command = ["ffmpeg", "-i", video_file]
@@ -59,11 +67,11 @@ def main():
     
     # map all existing audio streams unless we want to overwrite one
     for stream_index, lang in existing_audio_streams.items():
-        if lang in [get_language_code(audio_file) for audio_file in audio_files]:
-            stream_args.extend(["-map", f"{stream_index}:a:0"])
-            stream_args.extend([f"-metadata:s:a:{stream_index}", f"language={lang}"])
+        if lang in new_audio_streams:
+            audio_file_index = new_audio_streams.index(lang)
+            stream_args.extend(["-map", f"{audio_file_index}:a:0"])
         else:
-          stream_args.extend(["-map", f"0:{stream_index}"])
+            stream_args.extend(["-map", f"0:{stream_index}"])
 
     new_stream_index = max(existing_audio_streams.keys(), default=-1) + 1
     for audio_file_index, audio_file in enumerate(audio_files):
@@ -75,16 +83,17 @@ def main():
           stream_args.extend([f"-metadata:s:{new_stream_index}", f"language={audio_language}"])
           new_stream_index += 1
 
+    output_filename = os.path.splitext(video_file)[0] + '-out' + os.path.splitext(video_file)[1]
     final_command = (
         ffmpeg_command +
         stream_args +
-        ["-c", "copy", "-y", "output.mp4"]
+        ["-c", "copy", "-y", output_filename]
     )
 
     print(' '.join(final_command))
-    # ffmpeg -i camp2023-57571-deu-Jens_Spahns_credit_score_is_very_good_sd.mp4 -i camp2023-57571-deu-Jens_Spahns_credit_score_is_very_good_opus-eng.opus -map 0:v:0 -map 0:a:0 -c copy -metadata:s:a:1 language=eng -y output.mp4
-    # Run the ffmpeg command
-    #subprocess.call(final_command)
+    if not dry_run_flag:
+      subprocess.call(final_command)
+      print(f"Wrote {output_filename}")
 
 if __name__ == "__main__":
     main()

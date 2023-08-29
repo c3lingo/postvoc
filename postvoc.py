@@ -6,6 +6,25 @@ import subprocess
 import sys
 
 
+iso3cc_to_language = {
+    'eng': 'English',
+    'deu': 'Deutsch',
+    'fra': 'Français',
+    'spa': 'Español',
+    'ita': 'Italiano',
+    'por': 'Português',
+    'nld': 'Nederlands',
+    'swe': 'Svenska',
+    'fin': 'Suomi',
+    'dan': 'Dansk',
+    'nor': 'Norsk',
+    'pol': 'Polski',
+    'ces': 'Čeština',
+    'hun': 'Magyar',
+    'ron': 'Română'
+}
+
+
 def get_language_code(filename):
     match = re.search(r'-(\w{3})\.\w+$', filename)
     if match:
@@ -64,6 +83,8 @@ def main():
     ffmpeg_command = ["ffmpeg", "-i", video_file]
     # And map video from input #0 to output
     stream_args = ["-map", "0:v"]
+    # Map metadata from original only
+    stream_args.extend(["-map_metadata", "0"])
     
     # map all existing audio streams unless we want to overwrite one
     for stream_index, lang in existing_audio_streams.items():
@@ -81,6 +102,7 @@ def main():
           ffmpeg_command.extend(["-i", audio_file])
           stream_args.extend(["-map", f"{audio_file_index+1}:a:0"])
           stream_args.extend([f"-metadata:s:{new_stream_index}", f"language={audio_language}"])
+          stream_args.extend([f"-metadata:s:{new_stream_index}", f"title={iso3cc_to_language.get(audio_language, audio_language)}"])
           new_stream_index += 1
 
     output_filename = os.path.splitext(video_file)[0] + '-out' + os.path.splitext(video_file)[1]

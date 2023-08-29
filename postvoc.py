@@ -68,6 +68,9 @@ def main():
     new_audio_streams = []
     for audio_file_index, audio_file in enumerate(audio_files):
         audio_language = get_language_code(audio_file)
+        if audio_language is None:
+            print(f"Audio language could not be determined for file '{audio_file}'. Name the file foobar-CC3.ext where CC3 is an ISO 3-letter language code.")
+            return
         new_audio_streams.append(audio_language)
 
     print(f"Video file {video_file} has existing audio streams: {existing_audio_streams}")
@@ -81,8 +84,8 @@ def main():
 
     # Construct the ffmpeg command: Load video file as input #0
     ffmpeg_command = ["ffmpeg", "-i", video_file]
-    # And map video from input #0 to output
-    stream_args = ["-map", "0:v"]
+    # And map video from input #0 to output copying (not re-encoding)
+    stream_args = ["-map", "0:v", "-c:v", "copy"]
     # Map metadata from original only
     stream_args.extend(["-map_metadata", "0"])
     
@@ -90,26 +93,31 @@ def main():
     for stream_index, lang in existing_audio_streams.items():
         if lang in new_audio_streams:
             audio_file_index = new_audio_streams.index(lang)
+            # map new audio file as stream
             stream_args.extend(["-map", f"{audio_file_index}:a:0"])
         else:
+            # copy existing stream
             stream_args.extend(["-map", f"0:{stream_index}"])
+            stream_args.extend([f"-c:{stream_index}", "copy"])
 
     new_stream_index = max(existing_audio_streams.keys(), default=-1) + 1
     for audio_file_index, audio_file in enumerate(audio_files):
         audio_language = get_language_code(audio_file)
         if audio_language not in existing_audio_streams.values():
-          # replacing existing languages already happened above
-          ffmpeg_command.extend(["-i", audio_file])
-          stream_args.extend(["-map", f"{audio_file_index+1}:a:0"])
-          stream_args.extend([f"-metadata:s:{new_stream_index}", f"language={audio_language}"])
-          stream_args.extend([f"-metadata:s:{new_stream_index}", f"title={iso3cc_to_language.get(audio_language, audio_language)}"])
-          new_stream_index += 1
+            # replacing existing languages already happened above
+            ffmpeg_command.extend(["-i", audio_file])
+            i = audio_file_index + 1
+            stream_args.extend(["-filter_complex", f"[{i}:a]compand=points=-20/-600|-18/-18[ta{i}];[ta{i}]asplit=2[sc{i}][mix{i}];[0:a][sc{i}]sidechaincompress=level_in=0.3:threshold=0.1:attack=50:release=2500[compr{i}];[compr{i}][mix{i}]amix[final{i}]"])
+            stream_args.extend(["-map", f"[final{i}]"])
+            stream_args.extend([f"-metadata:s:{new_stream_index}", f"language={audio_language}"])
+            stream_args.extend([f"-metadata:s:{new_stream_index}", f"title={iso3cc_to_language.get(audio_language, audio_language)}"])
+            new_stream_index += 1
 
     output_filename = os.path.splitext(video_file)[0] + '-out' + os.path.splitext(video_file)[1]
     final_command = (
         ffmpeg_command +
         stream_args +
-        ["-c", "copy", "-y", output_filename]
+        ["-y", output_filename]
     )
 
     print(' '.join(final_command))
